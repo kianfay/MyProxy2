@@ -1,12 +1,16 @@
+/* 
+    LEFT OFF AT: websocket to webserver is not actually connected
+
+ */
 var net = require('net');
 var dns = require('dns');
-var url = require('url');
+var tls = require('tls');
 
 // Create proxy server and start listening for requests
 const proxyServer = net.createServer();
 
 // For debugging reasons
-proxyServer.maxConnections = 1;
+//proxyServer.maxConnections = 1;
 
 proxyServer.on('connection', (socket) => {
     
@@ -17,6 +21,9 @@ proxyServer.on('connection', (socket) => {
 /*  Set encoding so we can deal with incloming HTTP requests as strings, 
 **  even if just for debugging */
     socket.setEncoding('utf8');
+
+    //console.log("readystate: " + socket.readyState);
+    //proxyServer.close();
 
     var ProxyCLientS = null;
 
@@ -39,17 +46,19 @@ proxyServer.on('connection', (socket) => {
             // create a TCP connection to the webserver's IP (using 80 for any HTTP requests)
             ProxyCLient = net.connect(port ,addr, () => {
                 console.log("connected to webserver");
+                console.log("readystate: " + ProxyCLient.readyState);
+
+
+                ProxyCLient.on('data', (dataFromWebServer) => {
+                    //console.log("Recieved this data as a response: " + dataFromWebServer);
+                    console.log("forwarding this RESPONSE to whichever source requested " + host);
+                    socket.write(dataFromWebServer)
+                }) 
+
+                ProxyCLient.write(forwardData);
             })
 
-            ProxyCLient.setEncoding('utf-8');
-            
-            ProxyCLient.write(forwardData);
-              
-            ProxyCLient.on('data', (dataFromWebServer) => {
-                console.log("Recieved this data as a response: " + dataFromWebServer);
-                console.log("forwarding this RESPONSE to whichever source requested " + host);
-                socket.write(dataFromWebServer)
-            }) 
+            //ProxyCLient.setEncoding('utf-8');
         });
     }
 
@@ -71,7 +80,30 @@ proxyServer.on('connection', (socket) => {
             ProxyCLientS = net.connect(port ,addr, () => {
                 console.log("connected to webserver");
 
-                socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+                SSLSocket = new tls.TLSSocket({socket: socket, host: host }, () => {
+                    socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+                    console.log("Upgraded to SSL, state " + SSLSocket.readyState)
+                });
+
+                SSLSocket.on('data', (dataFromClient) => {
+                    console.log("Tunelling data from client to server");
+                    console.log("readystate: " + socket.readyState);
+                    console.log("Recieved data for tunneling, will send to webserver on socket which is currently: " + ProxyCLientS.readyState)
+                    ProxyCLientS.write(dataFromClient)
+                });
+
+                ProxyCLientS.on('error', (error) => {
+                    console.log('Received an error at the connection between client and proxy')
+                    console.log(error)
+                });
+
+                ProxyCLientS.on('data', (dataFromWebServer) => {
+                    console.log("Tunelling data from server back to client");
+                    console.log("readystate: " + socket.readyState);
+                    console.log("forwarding this RESPONSE to whichever source requested " + host);
+                    socket.write(dataFromWebServer)
+                });
+
 
                 /* socket.on('data', (data) => {
                     console.log("Tunelling data from client to server")
@@ -79,16 +111,6 @@ proxyServer.on('connection', (socket) => {
                 }) */
             })
 
-            ProxyCLientS.on('error', (error) => {
-                console.log('Received an error at the connection between client and proxy')
-                console.log(error)
-            });
-
-            ProxyCLientS.on('data', (dataFromWebServer) => {
-                console.log("Tunelling data from server to client");
-                console.log("forwarding this RESPONSE to whichever source requested " + host);
-                socket.write(dataFromWebServer)
-            });
         });
     }
 
@@ -98,12 +120,13 @@ proxyServer.on('connection', (socket) => {
 
     // Set callback for when a request is received to forward the data
     socket.on('data', (data) => {
-
         if(ProxyCLientS != null){
+            console.log("Recieved data for tunneling, will send to proxy server which is currently: " + ProxyCLientS.readyState)
             console.log("trying to create tunnel")
             if(ProxyCLientS.write(data)){
                 console.log("tunnel created. data sent: "+ data.slice(1,10))
             }
+            return;
         }
 
         //** Debugging **//
