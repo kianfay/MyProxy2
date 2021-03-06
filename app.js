@@ -1,6 +1,21 @@
 var net = require('net');
 var dns = require('dns');
-var url = require('url');
+var ipc = require('node-ipc');
+
+ipc.config.id = 'proxyServerIPC';
+ipc.config.retry = 1500;
+ipc.config.silent = false;
+
+ipc.serve(() => {
+    ipc.server.on('addToBlacklist', message => {
+        console.log("Adding " + message + " to the blacklist");
+    });
+    ipc.server.on('checkStatusMessage', message => {
+        console.log("Checking status as per request");
+    });
+});
+
+ipc.server.start();
 
 // Create proxy server and start listening for requests
 const proxyServer = net.createServer();
@@ -8,7 +23,7 @@ const proxyServer = net.createServer();
 // For debugging reasons
 //proxyServer.maxConnections = 1;
 
-proxyServer.on('connection', (socket) => {
+proxyServer.on('connection', (clientSocket) => {
 
     var TLSActive = false;
     var TLSCount = 0;
@@ -18,10 +33,13 @@ proxyServer.on('connection', (socket) => {
 **  also the forwarding of the response */
     function forwardRequest(host, port, forwardData, HTTPS){
         
-        (HTTPS == true) ? 
-        console.log("Establishing TCP connection with: " + host + " at port " + port)
-        :
-        console.log("Forwarding data to: " + host + " at port " + port);
+        if(HTTPS == true){
+            ipc.server.broadcast('ConnectReq', "Forwarding a HTTPS request to " + host);
+            console.log("Establishing TCP connection with: " + host + " at port " + port)
+        } else {
+            ipc.server.broadcast('HTTPReq', "Forwarding a HTTP request to " + host);
+            console.log("Forwarding data to: " + host + " at port " + port);
+        }
 
         
         // use DNS to translate hostname to IP
@@ -52,17 +70,17 @@ proxyServer.on('connection', (socket) => {
                     ProxyCLient.on('data', (dataFromWebServer) => {
                         console.log("Tunelling data from server to client");
                         console.log("forwarding this RESPONSE to whichever source requested " + host);
-                        socket.write(dataFromWebServer)
+                        clientSocket.write(dataFromWebServer)
                     });
 
-                    socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+                    clientSocket.write("HTTP/1.1 200 Connection established\r\n\r\n");
 
                 } else {
 
                     ProxyCLient.on('data', (dataFromWebServer) => {
                         console.log("Recieved this data as a response: " + dataFromWebServer);
                         console.log("forwarding this RESPONSE to whichever source requested " + host);
-                        socket.write(dataFromWebServer)
+                        clientSocket.write(dataFromWebServer)
                     }) 
 
                     ProxyCLient.write(forwardData);
@@ -71,44 +89,8 @@ proxyServer.on('connection', (socket) => {
         });
     }
 
-    function forwardRequestSSL(host, port, forwardData){
-        
-        console.log("Establishing TCP connection with: " + host + " at port " + port);
-        
-        // use DNS to translate hostname to IP
-        dns.lookup(host, (error, addr, fam) => {
-                
-            if(error){
-                console.log("Error parsing this hostname: " + error);
-                return;
-            }
-            
-            console.log("Parsed URL ( " + host + " ) translated to IP"  + fam + ": " + addr);
 
-            // create a TCP connection to the webserver's IP (using 80 for any HTTP requests)
-            ProxyCLientS = net.connect(port ,addr, () => {
-                console.log("connected to webserver");
-
-                ProxyCLientS.setKeepAlive(true)
-
-                ProxyCLientS.on('error', (error) => {
-                    console.log('Received an error at the connection between server and proxy')
-                    console.log(error)
-                });
-
-                ProxyCLientS.on('data', (dataFromWebServer) => {
-                    console.log("Tunelling data from server to client");
-                    console.log("forwarding this RESPONSE to whichever source requested " + host);
-                    socket.write(dataFromWebServer)
-                });
-
-                socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
-
-            })
-        });
-    }
-
-    socket.on('error', (error) => {
+    clientSocket.on('error', (error) => {
         console.log('Received an error at the connection between client and proxy')
     })
 
@@ -116,7 +98,7 @@ proxyServer.on('connection', (socket) => {
     Set callback for when a request is received first check if a TLS tunnel is in opperation, 
     and then if not, we assume it is a HTTP request, so we extract the verb and respond appropriately.
     */ 
-   socket.on('data', (data) => {
+   clientSocket.on('data', (data) => {
 
         if(TLSActive == true){
             if(ProxyCLient.write(data)){
@@ -147,7 +129,7 @@ proxyServer.on('connection', (socket) => {
             match = /Host: (.+):.+\r\n.*/.exec(data);
             if(match){
                 console.log("Host is: " + match[1]);
-                socket.setKeepAlive(true)
+                clientSocket.setKeepAlive(true)
                 forwardRequest(match[1], 443, data, true);
             }
         }

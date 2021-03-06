@@ -3,11 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "node ./app.js"
+    "startProxy": "node ./app.js",
+    "startManage": "node ./ManagementConsole.js"
   },
   "dependencies": {
     "net": "1.0.2",
     "dns": "0.2.2",
-    "tls": "^0.0.1"
+    "tls": "^0.0.1",
+    "node-ipc": "9.1.4"
   }
 }
