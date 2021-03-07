@@ -1,6 +1,21 @@
 var net = require('net');
 var dns = require('dns');
-var url = require('url');
+var ipc = require('node-ipc');
+
+ipc.config.id = 'proxyServerIPC';
+ipc.config.retry = 1500;
+ipc.config.silent = false;
+
+ipc.serve(() => {
+    ipc.server.on('addToBlacklist', message => {
+        console.log("Adding " + message + " to the blacklist");
+    });
+    ipc.server.on('checkStatusMessage', message => {
+        console.log("Checking status as per request");
+    });
+});
+
+ipc.server.start();
 
 // Create proxy server and start listening for requests
 const proxyServer = net.createServer();
@@ -21,6 +36,7 @@ proxyServer.on('connection', (socket) => {
     function forwardRequest(host, port, forwardData){
         
         console.log("Forwarding data to: " + host + " at port " + port);
+        ipc.server.broadcast('HTTPReq', "Forwarding a HTTP request to " + host);
         
         // use DNS to translate hostname to IP
         dns.lookup(host, (error, addr, fam) => {
@@ -52,7 +68,8 @@ proxyServer.on('connection', (socket) => {
     function forwardRequestSSL(host, port, forwardData){
         
         console.log("Establishing TCP connection with: " + host + " at port " + port);
-        
+        ipc.server.broadcast('ConnectReq', "Forwarding a HTTPS request to " + host);
+
         // use DNS to translate hostname to IP
         dns.lookup(host, (error, addr, fam) => {
                 
