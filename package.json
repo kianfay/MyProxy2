@@ -7,8 +7,6 @@
     "startManage": "node ./ManagementConsole.js"
   },
   "dependencies": {
-    "net": "1.0.2",
-    "dns": "0.2.2",
     "node-ipc": "9.1.4"
   }
 }
