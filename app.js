@@ -22,9 +22,30 @@ ipc.config.retry = 1500;
 ipc.config.silent = false;
 
 ipc.serve(() => {
+
     ipc.server.on('addToBlacklist', message => {
-        console.log("Adding " + message + " to the blacklist");
+        if(localBlacklist){
+            console.log("Adding " + message + " to the blacklist");
+
+            localBlacklist.push(message)
+            var objectToWriteAsJSON = {
+                blacklistedURLArray: localBlacklist
+            }
+
+            fs.writeFile('./blacklist.json', JSON.stringify(objectToWriteAsJSON), () => {
+                console.log("Wrote new url to blacklist: " + message)
+            })
+        }
     });
+
+    ipc.server.on('queryBlacklist', message => {
+        if(localBlacklist){
+            ipc.server.broadcast('BlacklistListing', localBlacklist);
+        } else {
+            ipc.server.broadcast('BlacklistListing', "Proxy server's blacklist remains uninitialised");
+        }
+    });
+
 });
 ipc.server.start();
 
@@ -148,6 +169,7 @@ proxyServer.on('connection', (socket) => {
             // its on the blacklist and if so reject by sending a bad request HTTP response
             if(match){
                 if(localBlacklist && localBlacklist.includes(match[1])){
+                    console.log("Blocking access to: " + match[1]);
                     return;
                 } else {
                     // console.log("Host is: " + match[1]);
@@ -161,6 +183,7 @@ proxyServer.on('connection', (socket) => {
 
             if(match){
                 if(localBlacklist && localBlacklist.includes(match[1])){
+                    console.log("Blocking access to: " + match[1]);
                     return;
                 } else {
                     // console.log("Host is: " + match[1]);
