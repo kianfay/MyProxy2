@@ -3,19 +3,45 @@ var dns = require('dns');
 var ipc = require('node-ipc');
 var fs = require('fs');
 
+var cacheAddress = './cache.json';
+var blacklistAddress = './blacklist.json';
+
 /* We fetch the blacklist JSON local file 
 ** and convert it to a JS object */
 var localBlacklist = null;
-fs.readFile('./blacklist.json', 'utf-8', (error, data) => {
+fs.readFile(blacklistAddress, 'utf-8', (error, data) => {
     if(error) { 
-        console.err("Error importing blacklist")
+        console.error("Error importing blacklist")
     }
     listJSON = JSON.parse(data);
 
     // Extracts the string array of blocked URLs
     localBlacklist = listJSON.blacklistedURLArray;
     
-    console.log("Blocked URLs: " + localBlacklist.join(', '));
+    //console.log("Blocked URLs: " + localBlacklist.join(', '));
+})
+
+
+/*  We fetch our local cache file and extract the list 
+**  of url mappings to HTTP response  */
+var localCache = null;
+var cacheMap = null;
+
+fs.readFile(cacheAddress, 'utf-8', (error, data) => {
+    if(error) { 
+        console.error("Error importing cache")
+    }
+    listJSON = JSON.parse(data);
+
+    // Extracts the string array of blocked URLs
+    localCache = listJSON.cachedHTTPResponses;
+    
+    //console.log("Completed importing cache, of size: " + localCache.length);
+
+    cacheMap = new Map();
+    for(var i = 0; i < localCache.length; i++){
+        cacheMap.set(localCache[i].url, localCache[i].response)
+    }
 })
 
 
@@ -29,7 +55,7 @@ ipc.serve(() => {
 
     ipc.server.on('addToBlacklist', message => {
         if(localBlacklist){
-            console.log("Adding " + message + " to the blacklist");
+            //console.log("Adding " + message + " to the blacklist");
 
             localBlacklist.push(message)
             var objectToWriteAsJSON = {
@@ -37,7 +63,7 @@ ipc.serve(() => {
             }
 
             fs.writeFile('./blacklist.json', JSON.stringify(objectToWriteAsJSON), () => {
-                console.log("Wrote new url to blacklist: " + message)
+                //console.log("Wrote new url to blacklist: " + message)
             })
         }
     });
@@ -52,26 +78,6 @@ ipc.serve(() => {
 
 });
 ipc.server.start();
-
-/*  We fetch our local cache file and extract the list 
-**  of url mappings to HTTP response  */
-var cacheMap = null;
-fs.readFile('./cache.json', 'utf-8', (error, data) => {
-    if(error) { 
-        console.err("Error importing cache")
-    }
-    listJSON = JSON.parse(data);
-
-    // Extracts the string array of blocked URLs
-    var localCache = listJSON.cachedHTTPResponses;
-    
-    console.log("Completed importing cache, of size: " + localCache.length);
-
-    cacheMap = new Map();
-    for(var i = 0; i < localCache.length; i++){
-        cacheMap.set(localCache[i].url, localCache[i].response)
-    }
-})
 
 
 /* Finally we create proxy server and start listening for requests, and
@@ -98,16 +104,16 @@ proxyServer.on('connection', (socket) => {
         
         // Check cache first
         if(cacheMap && cacheMap.has(host)){
-            console.log('SENT cacheed');
+
             socket.write(cacheMap.get(host));
+
         } else {
-            console.log('not cacheed')
 
             // use DNS to translate hostname to IP
             dns.lookup(host, (error, addr, fam) => {
                     
                 if(error){
-                    console.log("Error parsing this hostname: " + error);
+                    console.error("Error parsing this hostname: " + error);
                     return;
                 }
                 
@@ -115,7 +121,7 @@ proxyServer.on('connection', (socket) => {
 
                 // create a TCP connection to the webserver's IP (using 80 for any HTTP requests)
                 ProxyCLient = net.connect(port ,addr, () => {
-                    console.log("connected to webserver");
+                    //console.log("connected to webserver");
                 })
 
                 //ProxyCLient.setEncoding('utf-8');
@@ -128,8 +134,21 @@ proxyServer.on('connection', (socket) => {
                     socket.write(dataFromWebServer);
                     if(cacheMap) {
                         cacheMap.set(host, dataFromWebServer);
+                        localCache.push({
+                            url: host,
+                            response: dataFromWebServer
+                        });
+                        
+
+                        var toWrite = {
+                            cachedHTTPResponses: localCache
+                        }
+                        fs.writeFile('./cache.json', JSON.stringify(toWrite), (err) => {
+                                if (err) throw err;
+                                console.log('The file has been saved!');
+                        })
                     }
-                    console.log(cacheMap)
+                    //console.log(cacheMap)
                 }) 
             });
         }
@@ -144,7 +163,7 @@ proxyServer.on('connection', (socket) => {
         dns.lookup(host, (error, addr, fam) => {
                 
             if(error){
-                console.log("Error parsing this hostname: " + error);
+                console.error("Error parsing this hostname: " + error);
                 return;
             }
             
@@ -157,8 +176,7 @@ proxyServer.on('connection', (socket) => {
                 ProxyCLientS.setKeepAlive(true)
 
                 ProxyCLientS.on('error', (error) => {
-                    console.log('Received an error at the connection between server and proxy')
-                    console.log(error)
+                    console.error('Received an error at the connection between server and proxy' + error)
                 });
 
                 ProxyCLientS.on('data', (dataFromWebServer) => {
@@ -174,7 +192,7 @@ proxyServer.on('connection', (socket) => {
     }
 
     socket.on('error', (error) => {
-        console.log('Received an error at the connection between client and proxy')
+        console.error('Received an error at the connection between client and proxy')
     })
 
     // Set callback for when a request is received to forward the data
@@ -205,7 +223,7 @@ proxyServer.on('connection', (socket) => {
             // its on the blacklist and if so reject by sending a bad request HTTP response
             if(match){
                 if(localBlacklist && localBlacklist.includes(match[1])){
-                    console.log("Blocking access to: " + match[1]);
+                    //console.log("Blocking access to: " + match[1]);
                     return;
                 } else {
                     // console.log("Host is: " + match[1]);
@@ -219,7 +237,7 @@ proxyServer.on('connection', (socket) => {
 
             if(match){
                 if(localBlacklist && localBlacklist.includes(match[1])){
-                    console.log("Blocking access to: " + match[1]);
+                    //console.log("Blocking access to: " + match[1]);
                     return;
                 } else {
                     // console.log("Host is: " + match[1]);
