@@ -1,10 +1,11 @@
 var net = require('net');
 var dns = require('dns');
 var ipc = require('node-ipc');
-var fs = require('fs')
+var fs = require('fs');
 
+/* We fetch the blacklist JSON local file 
+** and convert it to a JS object */
 var localBlacklist = null;
-
 fs.readFile('./blacklist.json', 'utf-8', (error, data) => {
     if(error) { 
         console.err("Error importing blacklist")
@@ -17,6 +18,9 @@ fs.readFile('./blacklist.json', 'utf-8', (error, data) => {
     console.log("Blocked URLs: " + localBlacklist.join(', '));
 })
 
+
+/* We set up an IPC server for any management console to
+** connect to and monitor the proxy through */
 ipc.config.id = 'proxyServerIPC';
 ipc.config.retry = 1500;
 ipc.config.silent = false;
@@ -49,7 +53,30 @@ ipc.serve(() => {
 });
 ipc.server.start();
 
-// Create proxy server and start listening for requests
+/*  We fetch our local cache file and extract the list 
+**  of url mappings to HTTP response  */
+var cacheMap = null;
+fs.readFile('./cache.json', 'utf-8', (error, data) => {
+    if(error) { 
+        console.err("Error importing cache")
+    }
+    listJSON = JSON.parse(data);
+
+    // Extracts the string array of blocked URLs
+    var localCache = listJSON.cachedHTTPResponses;
+    
+    console.log("Completed importing cache, of size: " + localCache.length);
+
+    cacheMap = new Map();
+    for(var i = 0; i < localCache.length; i++){
+        cacheMap.set(localCache[i].url, localCache[i].response)
+    }
+})
+
+
+/* Finally we create proxy server and start listening for requests, and
+** on each request, we check the URL against the blacklist, and if it is not
+** blacklisted, we create a socket connection to the URL */
 const proxyServer = net.createServer();
 
 // For debugging reasons
@@ -57,12 +84,9 @@ const proxyServer = net.createServer();
 
 proxyServer.on('connection', (socket) => {
 
-
-    // Read the blacklist.json file from the local directory
-
-
-/*  Define this variable already, and when not null, we know we want a TLS channel, so
-**  we can divert any messages */
+/*  Define the socket connection between the proxy and a HTTPS target
+**  variable already, and when not null, we know we want a
+**  forwarding channel, so we can divert any messages */
     var ProxyCLientS = null;
 
 /*  Define a function which abstracts the forwarding of a request to the webserver, and
@@ -72,31 +96,43 @@ proxyServer.on('connection', (socket) => {
         // console.log("Forwarding data to: " + host + " at port " + port);
         ipc.server.broadcast('HTTPReq', "Forwarding a HTTP request to " + host);
         
-        // use DNS to translate hostname to IP
-        dns.lookup(host, (error, addr, fam) => {
+        // Check cache first
+        if(cacheMap && cacheMap.has(host)){
+            console.log('SENT cacheed');
+            socket.write(cacheMap.get(host));
+        } else {
+            console.log('not cacheed')
+
+            // use DNS to translate hostname to IP
+            dns.lookup(host, (error, addr, fam) => {
+                    
+                if(error){
+                    console.log("Error parsing this hostname: " + error);
+                    return;
+                }
                 
-            if(error){
-                console.log("Error parsing this hostname: " + error);
-                return;
-            }
-            
-            // console.log("Parsed URL ( " + host + " ) translated to IP"  + fam + ": " + addr);
+                // console.log("Parsed URL ( " + host + " ) translated to IP"  + fam + ": " + addr);
 
-            // create a TCP connection to the webserver's IP (using 80 for any HTTP requests)
-            ProxyCLient = net.connect(port ,addr, () => {
-                console.log("connected to webserver");
-            })
+                // create a TCP connection to the webserver's IP (using 80 for any HTTP requests)
+                ProxyCLient = net.connect(port ,addr, () => {
+                    console.log("connected to webserver");
+                })
 
-            //ProxyCLient.setEncoding('utf-8');
-            
-            ProxyCLient.write(forwardData);
-              
-            ProxyCLient.on('data', (dataFromWebServer) => {
-                // console.log("Recieved this data as a response: " + dataFromWebServer);
-                // console.log("forwarding this RESPONSE to whichever source requested " + host);
-                socket.write(dataFromWebServer)
-            }) 
-        });
+                //ProxyCLient.setEncoding('utf-8');
+                
+                ProxyCLient.write(forwardData);
+                
+                ProxyCLient.on('data', (dataFromWebServer) => {
+                    // console.log("Recieved this data as a response: " + dataFromWebServer);
+                    // console.log("forwarding this RESPONSE to whichever source requested " + host);
+                    socket.write(dataFromWebServer);
+                    if(cacheMap) {
+                        cacheMap.set(host, dataFromWebServer);
+                    }
+                    console.log(cacheMap)
+                }) 
+            });
+        }
     }
 
     function forwardRequestSSL(host, port){

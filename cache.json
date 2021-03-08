@@ -1,0 +1,16 @@
+{
+    "cachedHTTPResponses": [
+        { 
+            "url": "www.example.com", 
+            "response": "HTTP RESPONSE1"
+        },
+        { 
+            "url": "www.stam.com", 
+            "response": "HTTP RESPONSE2"
+        },
+        { 
+            "url": "www.exsample2.com", 
+            "response": "HTTP RESPONSE3"
+        }
+    ]
+}
