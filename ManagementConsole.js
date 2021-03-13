@@ -1,5 +1,4 @@
 var ipc = require('node-ipc');
-const { exit } = require('process');
 var readline = require('readline')
 
 // Boolean for whether the ipc connection is active, for error diagnostic
